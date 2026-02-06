@@ -8,6 +8,8 @@ pub enum DbError {
     Unexpected(String),
     #[error("encoding exception")]
     Encoding,
+    #[error("max size error, received: {0}, limit: {1}")]
+    MaxSize(usize, usize),
 }
 
 impl DbError {

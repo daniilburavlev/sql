@@ -1,9 +1,11 @@
 use crate::error::DbError;
 
+pub(crate) const PAGE_SIZE: usize = 4 * 1024;
+pub(crate) const LEN_SIZE: usize = 4;
+pub(crate) const PTR_SIZE: usize = 4;
+pub(crate) const MAX_KEY_VALUE_SIZE: usize = PAGE_SIZE - TYPE_SIZE - PTR_SIZE - LEN_SIZE * 3;
+
 const TYPE_SIZE: usize = 1;
-pub const PAGE_SIZE: usize = 4 * 1024;
-pub const LEN_SIZE: usize = 4;
-pub const PTR_SIZE: usize = 4;
 
 pub type Offset = u32;
 
@@ -201,6 +203,59 @@ impl TryInto<Vec<u8>> for Page {
     }
 }
 
+pub fn key_value_size(key: &str, value: &str) -> usize {
+    LEN_SIZE * 2 + key.len() + value.len()
+}
+
+fn key_offset_size(key: &str) -> usize {
+    LEN_SIZE + key.len() + PTR_SIZE
+}
+
+pub fn insert_key_value<T>(values: &mut Vec<(String, T)>, value: (String, T)) {
+    let idx = values
+        .binary_search_by(|kv| kv.0.cmp(&value.0))
+        .unwrap_or_else(|x| x);
+    if idx < values.len() && values[idx].0 == value.0 {
+        values[idx] = value;
+    } else if idx >= values.len() {
+        values.push(value);
+    } else {
+        values.insert(idx, value);
+    }
+}
+
+pub fn get_index<T>(values: &[(String, T)], value: &String) -> usize {
+    values
+        .binary_search_by(|kv| kv.0.cmp(value))
+        .unwrap_or_else(|x| if x == 0 { 0 } else { x - 1 })
+}
+
+pub type Splitted<T> = (Vec<(String, T)>, Vec<(String, T)>);
+
+pub fn split_leaf(mut values: Vec<(String, String)>) -> Splitted<String> {
+    let mid = values.len() / 2;
+    let mut right = values.split_off(mid);
+    let mut size = Page::leaf_size(&right);
+    while size > MAX_KEY_VALUE_SIZE {
+        let value = right.remove(0);
+        size -= key_value_size(&value.0, &value.1);
+        values.push(value);
+    }
+    (values, right)
+}
+
+pub fn split_node(mut values: Vec<(String, Offset)>) -> Splitted<Offset> {
+    let mid = values.len() / 2;
+    let mut right = values.split_off(mid);
+    let mut size = Page::node_size(&right);
+    while size > MAX_KEY_VALUE_SIZE {
+        let value = right.remove(0);
+        size -= key_offset_size(&value.0);
+        values.push(value);
+    }
+    (values, right)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,5 +304,68 @@ mod tests {
     fn node_size() {
         let node_values = vec![(1.to_string(), 123)];
         assert_eq!(18, Page::node_size(&node_values));
+    }
+
+    #[test]
+    fn insert_key_value_test() {
+        let mut offsets = vec![("0".to_string(), 1), ("237".to_string(), 2)];
+        insert_key_value(&mut offsets, ("325".to_string(), 3));
+        assert_eq!(
+            vec![
+                ("0".to_string(), 1),
+                ("237".to_string(), 2),
+                ("325".to_string(), 3),
+            ],
+            offsets,
+        );
+    }
+
+    #[test]
+    fn insert_key_value_in_order() {
+        let mut values = vec![];
+        let mut key_value = vec![];
+        for i in 0..1000 {
+            values.push((i.to_string(), i.to_string()));
+            insert_key_value(&mut key_value, (i.to_string(), i.to_string()));
+        }
+        values.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(values, key_value);
+    }
+
+    #[test]
+    fn check_key_value_size() {
+        let key_size = MAX_KEY_VALUE_SIZE / 2;
+        let key = 0.to_string().repeat(key_size);
+        let value = 1.to_string().repeat(MAX_KEY_VALUE_SIZE - key_size);
+        let mut values = Vec::new();
+        insert_key_value(&mut values, (key, value));
+        let size = Page::leaf_size(&values);
+        assert_eq!(PAGE_SIZE, size);
+    }
+
+    #[test]
+    fn split_huge_leaf() {
+        let mut values = vec![];
+        for i in 0..100 {
+            values.push((i.to_string().repeat(12), i.to_string()));
+        }
+        assert!(Page::leaf_size(&values) < PAGE_SIZE);
+        values.push((9.to_string().repeat(3000), 0.to_string()));
+        let (left, right) = split_leaf(values);
+        assert!(Page::leaf_size(&left) < PAGE_SIZE);
+        assert!(Page::leaf_size(&right) < PAGE_SIZE);
+    }
+
+    #[test]
+    fn split_huge_node() {
+        let mut values = Vec::<(String, Offset)>::new();
+        for i in 0..100 {
+            values.push((i.to_string().repeat(12), i));
+        }
+        assert!(Page::node_size(&values) < PAGE_SIZE);
+        values.push((9.to_string().repeat(3000), 0));
+        let (left, right) = split_node(values);
+        assert!(Page::node_size(&left) < PAGE_SIZE);
+        assert!(Page::node_size(&right) < PAGE_SIZE);
     }
 }

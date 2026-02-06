@@ -1,6 +1,6 @@
-pub mod btree;
+mod btree;
 mod error;
 mod page;
-pub mod pager;
+mod pager;
 
 pub use btree::BTree;

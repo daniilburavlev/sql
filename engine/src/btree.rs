@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use crate::page::PAGE_SIZE;
+use crate::page::{
+    MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, key_value_size, split_leaf,
+    split_node,
+};
 use crate::{
     error::DbError,
     page::{Offset, Page},
@@ -44,8 +47,7 @@ impl BTree {
                             self.pager.write_page_at_offset(page, offset)?;
                             break;
                         }
-                        let mid = children.len() / 2;
-                        let right_children = children.split_off(mid);
+                        let (children, right_children) = split_node(children);
                         let left_key = children[0].0.clone();
                         let right_key = right_children[0].0.clone();
                         if parent == 0 {
@@ -84,6 +86,10 @@ impl BTree {
                     }
                 }
                 Page::Leaf { parent, mut values } => {
+                    let kv_size = key_value_size(&key, &value);
+                    if kv_size > MAX_KEY_VALUE_SIZE {
+                        return Err(DbError::MaxSize(kv_size, MAX_KEY_VALUE_SIZE));
+                    }
                     let key_value = (key.clone(), value.clone());
                     insert_key_value(&mut values, key_value);
                     if Page::leaf_size(&values) <= PAGE_SIZE {
@@ -91,8 +97,7 @@ impl BTree {
                         self.pager.write_page_at_offset(page, offset)?;
                         break;
                     }
-                    let mid = values.len() / 2;
-                    let right_values = values.split_off(mid);
+                    let (values, right_values) = split_leaf(values);
                     let left_key = values[0].0.clone();
                     let right_key = right_values[0].0.clone();
                     if parent == 0 {
@@ -198,25 +203,6 @@ impl BTree {
     }
 }
 
-fn insert_key_value<T>(values: &mut Vec<(String, T)>, value: (String, T)) {
-    let idx = values
-        .binary_search_by(|kv| kv.0.cmp(&value.0))
-        .unwrap_or_else(|x| x);
-    if idx < values.len() && values[idx].0 == value.0 {
-        values[idx] = value;
-    } else if idx >= values.len() {
-        values.push(value);
-    } else {
-        values.insert(idx, value);
-    }
-}
-
-fn get_index<T>(values: &[(String, T)], value: &String) -> usize {
-    values
-        .binary_search_by(|kv| kv.0.cmp(value))
-        .unwrap_or_else(|x| if x == 0 { 0 } else { x - 1 })
-}
-
 #[cfg(test)]
 mod tests {
     use tempfile::NamedTempFile;
@@ -301,32 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_key_value_test() {
-        let mut offsets = vec![("0".to_string(), 1), ("237".to_string(), 2)];
-        insert_key_value(&mut offsets, ("325".to_string(), 3));
-        assert_eq!(
-            vec![
-                ("0".to_string(), 1),
-                ("237".to_string(), 2),
-                ("325".to_string(), 3),
-            ],
-            offsets,
-        );
-    }
-
-    #[test]
-    fn insert_key_value_in_order() {
-        let mut values = vec![];
-        let mut key_value = vec![];
-        for i in 0..1000 {
-            values.push((i.to_string(), i.to_string()));
-            insert_key_value(&mut key_value, (i.to_string(), i.to_string()));
-        }
-        values.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(values, key_value);
-    }
-
-    #[test]
     fn insert_delete_key() {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
@@ -353,5 +313,17 @@ mod tests {
         let mut btree = BTree::new(tmpfile.path()).unwrap();
         let response = btree.delete(0.to_string()).unwrap();
         assert_eq!(response, None);
+    }
+
+    #[test]
+    fn insert_huge_key() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut btree = BTree::new(tmpfile.path()).unwrap();
+        let key = 0.to_string().repeat(PAGE_SIZE);
+        let Err(DbError::MaxSize(received, limit)) = btree.insert(key, 0.to_string()) else {
+            panic!("size hasn't been validated")
+        };
+        assert_eq!(received, 4105);
+        assert_eq!(limit, MAX_KEY_VALUE_SIZE);
     }
 }
