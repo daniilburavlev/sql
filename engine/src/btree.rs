@@ -330,14 +330,14 @@ mod tests {
     fn insert_delete_key() {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
-        for i in 0..100 {
+        for i in 0..1000 {
             btree.insert(i.to_string(), i.to_string()).unwrap();
             if i % 2 == 0 {
                 let result = btree.delete(i.to_string()).unwrap();
                 assert_eq!(result.unwrap(), i.to_string());
             }
         }
-        for i in 0..100 {
+        for i in 0..1000 {
             let result = btree.search(i.to_string()).unwrap();
             if i % 2 == 0 {
                 assert_eq!(result, None);
@@ -345,5 +345,13 @@ mod tests {
                 assert_eq!(result, Some(i.to_string()));
             }
         }
+    }
+
+    #[test]
+    fn delete_not_existed() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut btree = BTree::new(tmpfile.path()).unwrap();
+        let response = btree.delete(0.to_string()).unwrap();
+        assert_eq!(response, None);
     }
 }
