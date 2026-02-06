@@ -1,11 +1,12 @@
 use std::path::Path;
 
+use common::error::DbError;
+
 use crate::page::{
     MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, key_value_size, split_leaf,
     split_node,
 };
 use crate::{
-    error::DbError,
     page::{Offset, Page},
     pager::Pager,
 };

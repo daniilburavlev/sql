@@ -1,4 +1,4 @@
-use crate::error::DbError;
+use common::error::DbError;
 
 pub(crate) const PAGE_SIZE: usize = 4 * 1024;
 pub(crate) const LEN_SIZE: usize = 4;

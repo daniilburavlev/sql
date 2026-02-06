@@ -1,13 +1,11 @@
+use common::error::DbError;
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
-use crate::{
-    error::DbError,
-    page::{Offset, PAGE_SIZE, PTR_SIZE, Page},
-};
+use crate::page::{Offset, PAGE_SIZE, PTR_SIZE, Page};
 
 const HEADER_SIZE: usize = 128;
 
