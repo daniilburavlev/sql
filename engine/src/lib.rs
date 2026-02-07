@@ -1,5 +1,4 @@
 mod btree;
-mod error;
 mod page;
 mod pager;
 
