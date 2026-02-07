@@ -12,6 +12,28 @@ pub const VARCHAR_TYPE: u8 = 3;
 pub const LINK_TYPE: u8 = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ColType {
+    Int,
+    BigInt,
+    Varchar(usize),
+    Link,
+}
+
+impl TryFrom<u8> for ColType {
+    type Error = DbError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Int),
+            2 => Ok(Self::BigInt),
+            3 => Ok(Self::Varchar(0)),
+            4 => Ok(Self::Link),
+            _ => Err(DbError::Encoding),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Col {
     Int(i32),
     BigInt(i64),
