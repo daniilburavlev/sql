@@ -56,12 +56,12 @@ impl Col {
     }
 
     pub fn parse_varchar(buffer: &[u8], size: usize) -> Result<Self, DbError> {
-        let mut len = [0u8; INT_SIZE];
-        len.copy_from_slice(&buffer[0..INT_SIZE]);
-        let len = u32::from_be_bytes(len);
+        let mut len = [0u8; VARCHAR_LEN_SIZE];
+        len.copy_from_slice(&buffer[0..VARCHAR_LEN_SIZE]);
+        let len = u16::from_be_bytes(len);
 
         let mut value = vec![0u8; len as usize];
-        value.copy_from_slice(&buffer[INT_SIZE..INT_SIZE + len as usize]);
+        value.copy_from_slice(&buffer[VARCHAR_LEN_SIZE..VARCHAR_LEN_SIZE + len as usize]);
         let value = String::from_utf8_lossy(&value).to_string();
         Ok(Self::Varchar(value, size))
     }
@@ -78,10 +78,10 @@ impl Col {
             }
             Self::Varchar(value, size) => {
                 let len = value.len();
-                buffer[..INT_SIZE].copy_from_slice(&(len as u32).to_be_bytes());
+                buffer[..VARCHAR_LEN_SIZE].copy_from_slice(&(len as u16).to_be_bytes());
 
-                buffer[INT_SIZE..INT_SIZE + len].copy_from_slice(value.as_bytes());
-                Ok(INT_SIZE + size)
+                buffer[VARCHAR_LEN_SIZE..VARCHAR_LEN_SIZE + len].copy_from_slice(value.as_bytes());
+                Ok(VARCHAR_LEN_SIZE + size)
             }
             Self::Link => {
                 todo!()
@@ -111,10 +111,10 @@ mod tests {
         assert_eq!(big_int, restored);
 
         let varchar = Col::varchar("String", 256);
-        let mut buffer = [0u8; INT_SIZE + 256];
+        let mut buffer = [0u8; VARCHAR_LEN_SIZE + 256];
         let size = varchar.write(&mut buffer).unwrap();
-        assert_eq!(INT_SIZE + 256, size);
-        assert_eq!(buffer.len(), 256 + INT_SIZE);
+        assert_eq!(VARCHAR_LEN_SIZE + 256, size);
+        assert_eq!(buffer.len(), 256 + VARCHAR_LEN_SIZE);
         let restored = Col::parse_varchar(&buffer, 256).unwrap();
         assert_eq!(varchar, restored);
     }
