@@ -3,6 +3,14 @@ use common::error::DbError;
 pub const INT_SIZE: usize = 4;
 pub const BIGINT_SIZE: usize = 8;
 
+pub const COL_TYPE_SIZE: usize = 1;
+pub const VARCHAR_LEN_SIZE: usize = 2;
+
+pub const INT_TYPE: u8 = 1;
+pub const BIG_INT_TYPE: u8 = 2;
+pub const VARCHAR_TYPE: u8 = 3;
+pub const LINK_TYPE: u8 = 4;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Col {
     Int(i32),
@@ -12,6 +20,14 @@ pub enum Col {
 }
 
 impl Col {
+    pub fn get_type(&self) -> u8 {
+        match self {
+            Self::Int(_) => INT_TYPE,
+            Self::BigInt(_) => BIG_INT_TYPE,
+            Self::Varchar(_, _) => VARCHAR_TYPE,
+            Self::Link => LINK_TYPE,
+        }
+    }
     pub fn int(value: i32) -> Self {
         Self::Int(value)
     }
@@ -20,9 +36,9 @@ impl Col {
         Self::BigInt(value)
     }
 
-    pub fn varchar(value: String, size: usize) -> Self {
+    pub fn varchar(value: &str, size: usize) -> Self {
         assert!(value.len() < size);
-        Self::Varchar(value, size)
+        Self::Varchar(value.to_string(), size)
     }
 
     pub fn parse_int(buffer: &[u8]) -> Result<Self, DbError> {
@@ -49,30 +65,23 @@ impl Col {
         let value = String::from_utf8_lossy(&value).to_string();
         Ok(Self::Varchar(value, size))
     }
-}
 
-impl TryInto<Vec<u8>> for Col {
-    type Error = DbError;
-
-    fn try_into(self) -> Result<Vec<u8>, Self::Error> {
+    pub fn write(&self, buffer: &mut [u8]) -> Result<usize, DbError> {
         match self {
             Self::Int(value) => {
-                let mut buffer = vec![0u8; INT_SIZE];
-                buffer.copy_from_slice(&value.to_be_bytes());
-                Ok(buffer)
+                buffer[..INT_SIZE].copy_from_slice(&value.to_be_bytes());
+                Ok(INT_SIZE)
             }
             Self::BigInt(value) => {
-                let mut buffer = vec![0u8; BIGINT_SIZE];
-                buffer.copy_from_slice(&value.to_be_bytes());
-                Ok(buffer)
+                buffer[..BIGINT_SIZE].copy_from_slice(&value.to_be_bytes());
+                Ok(BIGINT_SIZE)
             }
             Self::Varchar(value, size) => {
                 let len = value.len();
-                let mut buffer = vec![0u8; INT_SIZE + size];
-                buffer[0..INT_SIZE].copy_from_slice(&(len as u32).to_be_bytes());
+                buffer[..INT_SIZE].copy_from_slice(&(len as u32).to_be_bytes());
 
                 buffer[INT_SIZE..INT_SIZE + len].copy_from_slice(value.as_bytes());
-                Ok(buffer)
+                Ok(INT_SIZE + size)
             }
             Self::Link => {
                 todo!()
@@ -88,17 +97,23 @@ mod tests {
     #[test]
     fn write_read() {
         let int = Col::int(10);
-        let buffer: Vec<u8> = int.clone().try_into().unwrap();
+        let mut buffer = [0u8; INT_SIZE];
+        let size = int.write(&mut buffer).unwrap();
+        assert_eq!(INT_SIZE, size);
         let restored = Col::parse_int(&buffer).unwrap();
         assert_eq!(int, restored);
 
         let big_int = Col::big_int(10);
-        let buffer: Vec<u8> = big_int.clone().try_into().unwrap();
+        let mut buffer = [0u8; BIGINT_SIZE];
+        let size = big_int.write(&mut buffer).unwrap();
+        assert_eq!(BIGINT_SIZE, size);
         let restored = Col::parse_bigint(&buffer).unwrap();
         assert_eq!(big_int, restored);
 
-        let varchar = Col::varchar("String".to_string(), 256);
-        let buffer: Vec<u8> = varchar.clone().try_into().unwrap();
+        let varchar = Col::varchar("String", 256);
+        let mut buffer = [0u8; INT_SIZE + 256];
+        let size = varchar.write(&mut buffer).unwrap();
+        assert_eq!(INT_SIZE + 256, size);
         assert_eq!(buffer.len(), 256 + INT_SIZE);
         let restored = Col::parse_varchar(&buffer, 256).unwrap();
         assert_eq!(varchar, restored);
