@@ -1,9 +1,10 @@
-use common::error::DbError;
+use common::{Pageable, error::DbError, read_num};
+use row::{Col, Row};
 
 pub(crate) const PAGE_SIZE: usize = 4 * 1024;
-pub(crate) const LEN_SIZE: usize = 4;
+pub(crate) const LEN_SIZE: usize = 2;
 pub(crate) const PTR_SIZE: usize = 4;
-pub(crate) const MAX_KEY_VALUE_SIZE: usize = PAGE_SIZE - TYPE_SIZE - PTR_SIZE - LEN_SIZE * 3;
+pub(crate) const MAX_KEY_VALUE_SIZE: usize = PAGE_SIZE - TYPE_SIZE - PTR_SIZE - LEN_SIZE;
 
 const TYPE_SIZE: usize = 1;
 
@@ -13,11 +14,11 @@ pub type Offset = u32;
 pub enum Page {
     Node {
         parent: u32,
-        children: Vec<(String, Offset)>,
+        children: Vec<(Col, Offset)>,
     },
     Leaf {
         parent: u32,
-        values: Vec<(String, String)>,
+        values: Vec<(Col, Row)>,
     },
 }
 
@@ -29,25 +30,19 @@ impl Page {
         }
     }
 
-    pub fn leaf_size(values: &Vec<(String, String)>) -> usize {
+    pub fn leaf_size(values: &Vec<(Col, Row)>) -> usize {
         let mut size = TYPE_SIZE + PTR_SIZE + LEN_SIZE;
         for (k, v) in values {
-            let k_len = k.len();
-            size += k_len;
-            size += LEN_SIZE;
-            let v_len = v.len();
-            size += v_len;
-            size += LEN_SIZE;
+            size += k.size();
+            size += v.size();
         }
         size
     }
 
-    pub fn node_size(values: &Vec<(String, u32)>) -> usize {
+    pub fn node_size(values: &Vec<(Col, Offset)>) -> usize {
         let mut size = TYPE_SIZE + PTR_SIZE + LEN_SIZE;
         for (key, _) in values {
-            let key_len = key.len();
-            size += key_len;
-            size += LEN_SIZE;
+            size += key.size();
             size += PTR_SIZE;
         }
         size
@@ -61,68 +56,37 @@ impl TryFrom<Vec<u8>> for Page {
         let mut offset = 0;
         let page_type = buffer[offset];
         offset += TYPE_SIZE;
-        let mut parent = [0u8; PTR_SIZE];
-        parent.copy_from_slice(&buffer[offset..offset + PTR_SIZE]);
-        let parent = u32::from_be_bytes(parent);
+
+        let parent = read_num!(buffer, u32, offset);
         offset += PTR_SIZE;
 
-        let mut elements = [0u8; LEN_SIZE];
-        elements.copy_from_slice(&buffer[offset..offset + LEN_SIZE]);
-        let elements = u32::from_be_bytes(elements);
+        let elements = read_num!(buffer, u16, offset);
+        offset += LEN_SIZE;
 
         match page_type {
             1 => {
                 let mut children = Vec::new();
-                let mut offset = PAGE_SIZE - LEN_SIZE;
                 for _ in 0..elements {
-                    let mut key_len = [0u8; LEN_SIZE];
-                    key_len.copy_from_slice(&buffer[offset..offset + LEN_SIZE]);
-                    let key_len = u32::from_be_bytes(key_len) as usize;
-                    offset -= key_len;
-                    if key_len == 0 {
-                        break;
-                    }
-                    let mut key = vec![0u8; key_len];
-                    key.copy_from_slice(&buffer[offset..offset + key_len]);
-                    let key = String::from_utf8_lossy(&key);
-                    offset -= PTR_SIZE;
+                    let (key, read) = Col::read(&buffer[offset..])?;
+                    offset += read;
 
-                    let mut pointer = [0u8; PTR_SIZE];
-                    pointer.copy_from_slice(&buffer[offset..offset + PTR_SIZE]);
-                    let pointer = u32::from_be_bytes(pointer);
-                    offset -= LEN_SIZE;
-                    children.push((key.to_string(), pointer));
+                    let pointer = read_num!(buffer, u32, offset);
+                    offset += PTR_SIZE;
+
+                    children.push((key, pointer));
                 }
                 Ok(Self::Node { parent, children })
             }
             2 => {
                 let mut values = Vec::new();
-                let mut offset = PAGE_SIZE - LEN_SIZE;
                 for _ in 0..elements {
-                    let mut key_len = [0u8; LEN_SIZE];
-                    key_len.copy_from_slice(&buffer[offset..offset + LEN_SIZE]);
-                    let key_len = u32::from_be_bytes(key_len) as usize;
-                    offset -= key_len;
-                    if key_len == 0 {
-                        break;
-                    }
-                    let mut key = vec![0u8; key_len];
-                    key.copy_from_slice(&buffer[offset..offset + key_len]);
-                    let key = String::from_utf8_lossy(&key);
-                    offset -= PTR_SIZE;
+                    let (key, read) = Col::read(&buffer[offset..])?;
+                    offset += read;
 
-                    let mut value_len = [0u8; LEN_SIZE];
-                    value_len.copy_from_slice(&buffer[offset..offset + LEN_SIZE]);
-                    let value_len = u32::from_be_bytes(value_len) as usize;
-                    offset -= value_len;
-                    if value_len == 0 {
-                        break;
-                    }
-                    let mut value = vec![0u8; value_len];
-                    value.copy_from_slice(&buffer[offset..offset + value_len]);
-                    let value = String::from_utf8_lossy(&value);
-                    offset -= PTR_SIZE;
-                    values.push((key.to_string(), value.to_string()));
+                    let (value, read) = Row::read(&buffer[offset..])?;
+                    offset += read;
+
+                    values.push((key, value));
                 }
                 Ok(Self::Leaf { parent, values })
             }
@@ -136,66 +100,46 @@ impl TryInto<Vec<u8>> for Page {
 
     fn try_into(self) -> Result<Vec<u8>, Self::Error> {
         let mut buffer = vec![0u8; PAGE_SIZE];
+        let mut offset = 0;
+
         let page_type = self.page_type();
-        buffer[0] = page_type;
+        buffer[offset] = page_type;
+        offset += TYPE_SIZE;
 
         match self {
             Self::Node { parent, children } => {
                 if Self::node_size(&children) > PAGE_SIZE {
                     return Err(DbError::Encoding);
                 }
-                let mut offset = TYPE_SIZE;
                 buffer[offset..offset + PTR_SIZE].copy_from_slice(&parent.to_be_bytes());
                 offset += PTR_SIZE;
+
                 buffer[offset..offset + LEN_SIZE]
-                    .copy_from_slice(&(children.len() as u32).to_be_bytes());
+                    .copy_from_slice(&(children.len() as u16).to_be_bytes());
+                offset += LEN_SIZE;
 
-                let mut offset = PAGE_SIZE - LEN_SIZE;
                 for (key, pointer) in children {
-                    let raw_key = key.as_bytes();
-                    let key_len = raw_key.len();
-                    buffer[offset..offset + LEN_SIZE]
-                        .copy_from_slice(&(key_len as u32).to_be_bytes());
-                    offset -= key_len;
-
-                    buffer[offset..offset + key_len].copy_from_slice(raw_key);
-                    offset -= PTR_SIZE;
+                    offset += key.write(&mut buffer[offset..])?;
 
                     buffer[offset..offset + PTR_SIZE].copy_from_slice(&pointer.to_be_bytes());
-                    offset -= PTR_SIZE;
+                    offset += PTR_SIZE;
                 }
             }
             Self::Leaf { parent, values } => {
                 if Self::leaf_size(&values) > PAGE_SIZE {
                     return Err(DbError::Encoding);
                 }
-                let mut offset = TYPE_SIZE;
                 buffer[offset..offset + PTR_SIZE].copy_from_slice(&parent.to_be_bytes());
                 offset += PTR_SIZE;
+
                 buffer[offset..offset + LEN_SIZE]
-                    .copy_from_slice(&(values.len() as u32).to_be_bytes());
+                    .copy_from_slice(&(values.len() as u16).to_be_bytes());
+                offset += LEN_SIZE;
 
-                let mut offset = PAGE_SIZE - LEN_SIZE;
                 for (key, value) in values {
-                    let raw_key = key.as_bytes();
-                    let key_len = raw_key.len();
-                    buffer[offset..offset + LEN_SIZE]
-                        .copy_from_slice(&(key_len as u32).to_be_bytes());
-                    offset -= key_len;
+                    offset += key.write(&mut buffer[offset..])?;
 
-                    buffer[offset..offset + key_len].copy_from_slice(raw_key);
-                    offset -= PTR_SIZE;
-
-                    let raw_value = value.as_bytes();
-                    let value_len = raw_value.len();
-                    buffer[offset..offset + LEN_SIZE]
-                        .copy_from_slice(&(value_len as u32).to_be_bytes());
-                    offset -= value_len;
-
-                    buffer[offset..offset + value_len].copy_from_slice(raw_value);
-                    if offset > PTR_SIZE {
-                        offset -= PTR_SIZE;
-                    }
+                    offset += value.write(&mut buffer[offset..])?;
                 }
             }
         }
@@ -203,15 +147,7 @@ impl TryInto<Vec<u8>> for Page {
     }
 }
 
-pub fn key_value_size(key: &str, value: &str) -> usize {
-    LEN_SIZE * 2 + key.len() + value.len()
-}
-
-fn key_offset_size(key: &str) -> usize {
-    LEN_SIZE + key.len() + PTR_SIZE
-}
-
-pub fn insert_key_value<T>(values: &mut Vec<(String, T)>, value: (String, T)) {
+pub fn insert_key_value<T>(values: &mut Vec<(Col, T)>, value: (Col, T)) {
     let idx = values
         .binary_search_by(|kv| kv.0.cmp(&value.0))
         .unwrap_or_else(|x| x);
@@ -224,33 +160,33 @@ pub fn insert_key_value<T>(values: &mut Vec<(String, T)>, value: (String, T)) {
     }
 }
 
-pub fn get_index<T>(values: &[(String, T)], value: &String) -> usize {
+pub fn get_index<T>(values: &[(Col, T)], value: &Col) -> usize {
     values
         .binary_search_by(|kv| kv.0.cmp(value))
         .unwrap_or_else(|x| if x == 0 { 0 } else { x - 1 })
 }
 
-pub type Splitted<T> = (Vec<(String, T)>, Vec<(String, T)>);
+pub type Splitted<T> = (Vec<(Col, T)>, Vec<(Col, T)>);
 
-pub fn split_leaf(mut values: Vec<(String, String)>) -> Splitted<String> {
+pub fn split_leaf(mut values: Vec<(Col, Row)>) -> Splitted<Row> {
     let mid = values.len() / 2;
     let mut right = values.split_off(mid);
     let mut size = Page::leaf_size(&right);
     while size > MAX_KEY_VALUE_SIZE {
         let value = right.remove(0);
-        size -= key_value_size(&value.0, &value.1);
+        size -= value.0.size() + value.1.size();
         values.push(value);
     }
     (values, right)
 }
 
-pub fn split_node(mut values: Vec<(String, Offset)>) -> Splitted<Offset> {
+pub fn split_node(mut values: Vec<(Col, Offset)>) -> Splitted<Offset> {
     let mid = values.len() / 2;
     let mut right = values.split_off(mid);
     let mut size = Page::node_size(&right);
     while size > MAX_KEY_VALUE_SIZE {
         let value = right.remove(0);
-        size -= key_offset_size(&value.0);
+        size -= value.0.size() + PTR_SIZE;
         values.push(value);
     }
     (values, right)
@@ -259,17 +195,17 @@ pub fn split_node(mut values: Vec<(String, Offset)>) -> Splitted<Offset> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use row::row;
 
     #[test]
-    fn page_node_convert() {
+    fn write_read() {
         let node = Page::Node {
             parent: 1337,
             children: vec![
-                ("1".to_string(), 1),
-                ("2".to_string(), 2),
-                ("3".to_string(), 3),
-                ("4".to_string(), 4),
-                ("5".to_string(), 5),
+                (Col::int(1), 10),
+                (Col::int(2), 11),
+                (Col::int(3), 3),
+                (Col::int(4), 4),
             ],
         };
         let buffer: Vec<u8> = node.clone().try_into().unwrap();
@@ -282,11 +218,12 @@ mod tests {
         let leaf = Page::Leaf {
             parent: 1338,
             values: vec![
-                ("1".to_string(), "1233".to_string()),
-                ("23".to_string(), "23".to_string()),
-                ("3321".to_string(), "311111j".to_string()),
-                ("42".to_string(), "431".to_string()),
-                ("51321".to_string(), "5".to_string()),
+                (Col::Int(1), row![Col::int(1)]),
+                (Col::Int(2), row![Col::int(2)]),
+                (Col::Int(3), row![Col::int(3)]),
+                (Col::Int(4), row![Col::int(4)]),
+                (Col::Int(5), row![Col::int(5)]),
+                (Col::Int(6), row![Col::int(6)]),
             ],
         };
         let buffer: Vec<u8> = leaf.clone().try_into().unwrap();
@@ -296,26 +233,22 @@ mod tests {
 
     #[test]
     fn leaf_size() {
-        let leaf_values = vec![(1.to_string(), 123.to_string())];
-        assert_eq!(21, Page::leaf_size(&leaf_values));
+        let leaf_values = vec![(Col::Int(1), row![Col::Int(10)])];
+        assert_eq!(18, Page::leaf_size(&leaf_values));
     }
 
     #[test]
     fn node_size() {
-        let node_values = vec![(1.to_string(), 123)];
-        assert_eq!(18, Page::node_size(&node_values));
+        let node_values = vec![(Col::Int(1), 10)];
+        assert_eq!(16, Page::node_size(&node_values));
     }
 
     #[test]
     fn insert_key_value_test() {
-        let mut offsets = vec![("0".to_string(), 1), ("237".to_string(), 2)];
-        insert_key_value(&mut offsets, ("325".to_string(), 3));
+        let mut offsets = vec![(Col::int(0), 1), (Col::Int(237), 2)];
+        insert_key_value(&mut offsets, (Col::Int(325), 3));
         assert_eq!(
-            vec![
-                ("0".to_string(), 1),
-                ("237".to_string(), 2),
-                ("325".to_string(), 3),
-            ],
+            vec![(Col::Int(0), 1), (Col::Int(237), 2), (Col::Int(325), 3),],
             offsets,
         );
     }
@@ -325,8 +258,8 @@ mod tests {
         let mut values = vec![];
         let mut key_value = vec![];
         for i in 0..1000 {
-            values.push((i.to_string(), i.to_string()));
-            insert_key_value(&mut key_value, (i.to_string(), i.to_string()));
+            values.push((Col::Int(i), Col::Int(i)));
+            insert_key_value(&mut key_value, (Col::Int(i), Col::Int(i)));
         }
         values.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(values, key_value);
@@ -334,9 +267,12 @@ mod tests {
 
     #[test]
     fn check_key_value_size() {
-        let key_size = MAX_KEY_VALUE_SIZE / 2;
-        let key = 0.to_string().repeat(key_size);
-        let value = 1.to_string().repeat(MAX_KEY_VALUE_SIZE - key_size);
+        let mut key_size = MAX_KEY_VALUE_SIZE / 2;
+        let mut value_size = MAX_KEY_VALUE_SIZE - key_size;
+        key_size -= 1 + 2 + 2;
+        value_size -= 1 + 2 + 2 + 1;
+        let key = Col::varchar("", key_size as u16);
+        let value = row![Col::varchar("", (value_size) as u16)];
         let mut values = Vec::new();
         insert_key_value(&mut values, (key, value));
         let size = Page::leaf_size(&values);
@@ -347,10 +283,10 @@ mod tests {
     fn split_huge_leaf() {
         let mut values = vec![];
         for i in 0..100 {
-            values.push((i.to_string().repeat(12), i.to_string()));
+            values.push((Col::varchar("", 12), row![Col::int(i)]));
         }
         assert!(Page::leaf_size(&values) < PAGE_SIZE);
-        values.push((9.to_string().repeat(3000), 0.to_string()));
+        values.push((Col::varchar("", 3000), row![Col::int(0)]));
         let (left, right) = split_leaf(values);
         assert!(Page::leaf_size(&left) < PAGE_SIZE);
         assert!(Page::leaf_size(&right) < PAGE_SIZE);
@@ -358,12 +294,12 @@ mod tests {
 
     #[test]
     fn split_huge_node() {
-        let mut values = Vec::<(String, Offset)>::new();
+        let mut values = Vec::<(Col, Offset)>::new();
         for i in 0..100 {
-            values.push((i.to_string().repeat(12), i));
+            values.push((Col::varchar("", 12), i));
         }
         assert!(Page::node_size(&values) < PAGE_SIZE);
-        values.push((9.to_string().repeat(3000), 0));
+        values.push((Col::varchar("", 3000), 0));
         let (left, right) = split_node(values);
         assert!(Page::node_size(&left) < PAGE_SIZE);
         assert!(Page::node_size(&right) < PAGE_SIZE);

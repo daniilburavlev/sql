@@ -1,11 +1,13 @@
 use std::path::Path;
 
+use common::Pageable;
 use common::error::DbError;
+use row::{Col, Row};
 
 use crate::page::{
-    MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, key_value_size, split_leaf,
-    split_node,
+    MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, split_leaf, split_node,
 };
+
 use crate::{
     page::{Offset, Page},
     pager::Pager,
@@ -30,10 +32,10 @@ impl BTree {
         Ok(Self { pager })
     }
 
-    pub fn insert(&mut self, key: String, value: String) -> Result<(), DbError> {
+    pub fn insert(&mut self, key: Col, value: Row) -> Result<(), DbError> {
         let mut offset = self.pager.get_root()?;
         let mut page = self.pager.get_page(offset)?;
-        let mut new_key_offset = None::<(String, Offset)>;
+        let mut new_key_offset = None::<(Col, Offset)>;
 
         loop {
             match page {
@@ -42,7 +44,7 @@ impl BTree {
                     mut children,
                 } => {
                     if let Some((key, child_offset)) = new_key_offset.take() {
-                        insert_key_value(&mut children, (key.clone(), child_offset));
+                        insert_key_value(&mut children, (key, child_offset));
                         if Page::node_size(&children) <= PAGE_SIZE {
                             let page = Page::Node { parent, children };
                             self.pager.write_page_at_offset(page, offset)?;
@@ -87,7 +89,7 @@ impl BTree {
                     }
                 }
                 Page::Leaf { parent, mut values } => {
-                    let kv_size = key_value_size(&key, &value);
+                    let kv_size = key.size() + value.size();
                     if kv_size > MAX_KEY_VALUE_SIZE {
                         return Err(DbError::MaxSize(kv_size, MAX_KEY_VALUE_SIZE));
                     }
@@ -136,7 +138,7 @@ impl BTree {
         Ok(())
     }
 
-    pub fn search(&mut self, key: String) -> Result<Option<String>, DbError> {
+    pub fn search(&mut self, key: Col) -> Result<Option<Row>, DbError> {
         let offset: Offset = self.pager.get_root()?;
         let mut page = self.pager.get_page(offset)?;
         loop {
@@ -156,7 +158,7 @@ impl BTree {
         }
     }
 
-    pub fn delete(&mut self, key: String) -> Result<Option<String>, DbError> {
+    pub fn delete(&mut self, key: Col) -> Result<Option<Row>, DbError> {
         let mut offset = self.pager.get_root()?;
         let mut page = self.pager.get_page(offset)?;
         loop {
@@ -184,7 +186,7 @@ impl BTree {
     fn rewrite_parent(
         &mut self,
         right_offset: u32,
-        right_children: &[(String, u32)],
+        right_children: &[(Col, Offset)],
     ) -> Result<(), DbError> {
         for (_, child_offset) in right_children.iter() {
             let updated_page = match self.pager.get_page(*child_offset)? {
@@ -206,6 +208,7 @@ impl BTree {
 
 #[cfg(test)]
 mod tests {
+    use row::row;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -215,8 +218,8 @@ mod tests {
         let tempfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tempfile.path()).unwrap();
         for i in 0..2 {
-            let key = i.to_string().repeat(1024);
-            let value = i.to_string().repeat(2048);
+            let key = Col::varchar(&i.to_string(), 1024);
+            let value = row![Col::varchar(&i.to_string(), 2048)];
             btree.insert(key, value).unwrap();
         }
         let mut pager = Pager::new(tempfile.path()).unwrap();
@@ -255,8 +258,8 @@ mod tests {
         let tempfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tempfile.path()).unwrap();
         for i in 0..4 {
-            let key = i.to_string().repeat(2000);
-            let value = i.to_string().repeat(2000);
+            let key = Col::varchar(&i.to_string(), 2000);
+            let value = row![Col::varchar(&i.to_string(), 2000)];
             btree.insert(key, value).unwrap();
         }
         let mut pager = Pager::new(tempfile.path()).unwrap();
@@ -272,18 +275,28 @@ mod tests {
         let tempfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tempfile.path()).unwrap();
         for i in 0..1000 {
-            btree.insert(i.to_string(), i.to_string()).unwrap();
+            btree
+                .insert(
+                    Col::varchar(&i.to_string(), 4),
+                    row![Col::varchar(&i.to_string(), 4)],
+                )
+                .unwrap();
         }
         for i in 0..1000 {
-            let value = btree.search(i.to_string()).unwrap();
-            assert_eq!(value.unwrap(), i.to_string());
+            let value = btree.search(Col::varchar(&i.to_string(), 4)).unwrap();
+            assert_eq!(value.unwrap(), row![Col::varchar(&i.to_string(), 4)]);
         }
         for i in 0..1000 {
-            btree.insert(i.to_string(), 0.to_string()).unwrap();
+            btree
+                .insert(
+                    Col::varchar(&i.to_string(), 4),
+                    row![Col::varchar(&0.to_string(), 4)],
+                )
+                .unwrap();
         }
         for i in 0..1000 {
-            let value = btree.search(i.to_string()).unwrap();
-            assert_eq!(value.unwrap(), 0.to_string());
+            let value = btree.search(Col::varchar(&i.to_string(), 4)).unwrap();
+            assert_eq!(value.unwrap(), row![Col::varchar(&0.to_string(), 4)]);
         }
     }
 
@@ -292,18 +305,23 @@ mod tests {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
         for i in 0..1000 {
-            btree.insert(i.to_string(), i.to_string()).unwrap();
+            btree
+                .insert(
+                    Col::varchar(&i.to_string(), 4),
+                    row![Col::varchar(&i.to_string(), 4)],
+                )
+                .unwrap();
             if i % 2 == 0 {
-                let result = btree.delete(i.to_string()).unwrap();
-                assert_eq!(result.unwrap(), i.to_string());
+                let result = btree.delete(Col::varchar(&i.to_string(), 4)).unwrap();
+                assert_eq!(result.unwrap(), row![Col::varchar(&i.to_string(), 4)]);
             }
         }
         for i in 0..1000 {
-            let result = btree.search(i.to_string()).unwrap();
+            let result = btree.search(Col::varchar(&i.to_string(), 4)).unwrap();
             if i % 2 == 0 {
                 assert_eq!(result, None);
             } else {
-                assert_eq!(result, Some(i.to_string()));
+                assert_eq!(result, Some(row![Col::varchar(&i.to_string(), 4)]));
             }
         }
     }
@@ -312,7 +330,7 @@ mod tests {
     fn delete_not_existed() {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
-        let response = btree.delete(0.to_string()).unwrap();
+        let response = btree.delete(Col::varchar(&0.to_string(), 4)).unwrap();
         assert_eq!(response, None);
     }
 
@@ -320,11 +338,13 @@ mod tests {
     fn insert_huge_key() {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
-        let key = 0.to_string().repeat(PAGE_SIZE);
-        let Err(DbError::MaxSize(received, limit)) = btree.insert(key, 0.to_string()) else {
+        let key = Col::varchar(&0.to_string(), PAGE_SIZE as u16);
+        let Err(DbError::MaxSize(received, limit)) =
+            btree.insert(key, row![Col::varchar(&0.to_string(), 4)])
+        else {
             panic!("size hasn't been validated")
         };
-        assert_eq!(received, 4105);
+        assert_eq!(received, 4111);
         assert_eq!(limit, MAX_KEY_VALUE_SIZE);
     }
 }
