@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["common","engine", "row"]
+members = ["common", "btree", "parser", "row"]
 
 [workspace.dependencies]
 thiserror = "2.0"

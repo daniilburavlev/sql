@@ -1,0 +1,291 @@
+use std::str::FromStr;
+
+use common::error::DbError;
+use row::ColType;
+
+use crate::token::Token;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Command {
+    Create { name: String, fields: Vec<ColType> },
+}
+
+impl Command {
+    pub(crate) fn parse(tokens: Vec<Token>) -> Result<Command, DbError> {
+        if tokens.is_empty() {
+            return Err(DbError::invalid_input("empty input"));
+        }
+        let mut idx = 1;
+        match tokens.first().unwrap() {
+            Token::Create => {
+                match tokens.get(idx) {
+                    Some(Token::Table) => {}
+                    Some(token) => {
+                        return Err(DbError::InvalidInput(format!(
+                            "unexpected symbol: {}",
+                            token
+                        )));
+                    }
+                    None => return Err(DbError::eof("expected 'CREATE' specifier")),
+                }
+                idx += 1;
+                let name = match tokens.get(idx) {
+                    Some(Token::Element(name)) => name.clone(),
+                    Some(token) => {
+                        return Err(DbError::InvalidInput(format!(
+                            "unexpected symbol: {}",
+                            token
+                        )));
+                    }
+                    None => return Err(DbError::eof("expected 'table_name' specifier")),
+                };
+                idx += 1;
+                check_delimeter(tokens.get(idx), '(')?;
+                idx += 1;
+                let mut fields = vec![];
+                let len = tokens.len();
+                let Some(Token::Delimiter(')')) = tokens.last() else {
+                    return Err(DbError::invalid_input("expect: ')'"));
+                };
+                while idx < len - 1 {
+                    let Some(Token::Element(field_name)) = tokens.get(idx) else {
+                        return Err(DbError::invalid_input("expected column name"));
+                    };
+                    idx += 1;
+                    let Some(Token::Element(field_type)) = tokens.get(idx) else {
+                        return Err(DbError::invalid_input("expected column type specifier"));
+                    };
+                    idx += 1;
+                    let field = match field_type.to_lowercase().as_str() {
+                        "int" => ColType::Int(field_name.clone()),
+                        "bigint" => ColType::BigInt(field_name.clone()),
+                        "varchar" => {
+                            check_delimeter(tokens.get(idx), '(')?;
+                            idx += 1;
+                            let size: u16 = get_num(tokens.get(idx))?;
+                            idx += 1;
+                            check_delimeter(tokens.get(idx), ')')?;
+                            idx += 1;
+                            ColType::Varchar(field_name.clone(), size)
+                        }
+                        _ => {
+                            return Err(DbError::InvalidInput(format!(
+                                "unknown column type: {}",
+                                field_type
+                            )));
+                        }
+                    };
+                    fields.push(field);
+                    idx += 1;
+                }
+                Ok(Self::Create { name, fields })
+            }
+            other => Err(DbError::InvalidInput(format!(
+                "unexpected symbol: {}",
+                other
+            ))),
+        }
+    }
+}
+
+fn get_num<T: FromStr>(token: Option<&Token>) -> Result<T, DbError> {
+    match token {
+        Some(Token::Element(num)) => num
+            .as_str()
+            .parse()
+            .map_err(|_| DbError::InvalidInput(format!("expected int, found: '{}'", num))),
+        Some(token) => Err(DbError::InvalidInput(format!("unexpected: {}", token))),
+        None => Err(DbError::eof("expected int value")),
+    }
+}
+
+fn check_delimeter(token: Option<&Token>, ch: char) -> Result<(), DbError> {
+    let Some(Token::Delimiter(c)) = token else {
+        return Err(DbError::InvalidInput(format!("expected: '{}'", ch)));
+    };
+    if *c != ch {
+        return Err(DbError::InvalidInput(format!(
+            "expected: '{}', found: '{}'",
+            ch, c
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_command() {
+        if let Err(DbError::InvalidInput(err)) = Command::parse(vec![]) {
+            assert_eq!("empty input", err);
+        } else {
+            panic!("empty not validated");
+        }
+    }
+
+    #[test]
+    fn create() {
+        let tokens = vec![
+            Token::Create,
+            Token::Table,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::element("id"),
+            Token::element("int"),
+            Token::Delimiter(','),
+            Token::element("name"),
+            Token::element("varchar"),
+            Token::Delimiter('('),
+            Token::element("10"),
+            Token::Delimiter(')'),
+            Token::Delimiter(')'),
+        ];
+        let command = Command::parse(tokens).unwrap();
+        assert_eq!(
+            Command::Create {
+                name: "users".to_string(),
+                fields: vec![
+                    ColType::Int("id".to_string()),
+                    ColType::Varchar("name".to_string(), 10)
+                ]
+            },
+            command
+        );
+    }
+
+    #[test]
+    fn miss_table() {
+        let tokens = vec![Token::Create];
+        let Err(DbError::EOF(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("expected 'CREATE' specifier", err);
+
+        let tokens = vec![Token::Create, Token::element("table")];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("unexpected symbol: 'table'", err);
+    }
+
+    #[test]
+    fn table_name() {
+        let tokens = vec![Token::Create, Token::Table];
+        let Err(DbError::EOF(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("expected 'table_name' specifier", err);
+
+        let tokens = vec![Token::Create, Token::Table, Token::Table];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("unexpected symbol: TABLE", err);
+    }
+
+    #[test]
+    fn illegal_command() {
+        let tokens = vec![Token::Where];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("unexpected symbol: WHERE", err);
+    }
+
+    #[test]
+    fn not_closed_create() {
+        let tokens = vec![
+            Token::Create,
+            Token::Table,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::element("id"),
+            Token::element("int"),
+        ];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("expect: ')'", err);
+    }
+
+    #[test]
+    fn invalid_type() {
+        let tokens = vec![
+            Token::Create,
+            Token::Table,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::element("id"),
+            Token::element("fda"),
+            Token::Delimiter(')'),
+        ];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("unknown column type: fda", err);
+    }
+
+    #[test]
+    fn invalid_column() {
+        let tokens = vec![
+            Token::Create,
+            Token::Table,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::Create,
+            Token::Create,
+            Token::Delimiter(')'),
+        ];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("expected column name", err);
+    }
+
+    #[test]
+    fn invalid_column_type() {
+        let tokens = vec![
+            Token::Create,
+            Token::Table,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::element("id"),
+            Token::Create,
+            Token::Delimiter(')'),
+        ];
+        let Err(DbError::InvalidInput(err)) = Command::parse(tokens) else {
+            panic!("error not validated");
+        };
+        assert_eq!("expected column type specifier", err);
+    }
+
+    #[test]
+    fn num_from_el() {
+        let Err(DbError::InvalidInput(err)) = get_num::<u16>(Some(&Token::element("i1231fdsaf")))
+        else {
+            panic!("error nov validated");
+        };
+        assert_eq!("expected int, found: 'i1231fdsaf'", err);
+
+        let Err(DbError::InvalidInput(err)) = get_num::<u16>(Some(&Token::Create)) else {
+            panic!("error nov validated");
+        };
+        assert_eq!("unexpected: CREATE", err);
+    }
+
+    #[test]
+    fn invalid_delimiter() {
+        let Err(DbError::InvalidInput(err)) = check_delimeter(Some(&Token::Create), ' ') else {
+            panic!("error not valdated");
+        };
+        assert_eq!("expected: ' '", err);
+
+        let Err(DbError::InvalidInput(err)) = check_delimeter(Some(&Token::Delimiter('a')), ' ')
+        else {
+            panic!("error not valdated");
+        };
+        assert_eq!("expected: ' ', found: 'a'", err);
+    }
+}

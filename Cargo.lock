@@ -9,6 +9,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 
 [[package]]
+name = "btree"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "row",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -25,16 +35,6 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "thiserror",
-]
-
-[[package]]
-name = "engine"
-version = "0.1.0"
-dependencies = [
- "common",
- "row",
- "tempfile",
- "uuid",
 ]
 
 [[package]]
@@ -92,6 +92,14 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "parser"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "row",
+]
 
 [[package]]
 name = "proc-macro2"

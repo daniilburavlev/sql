@@ -10,11 +10,23 @@ pub enum DbError {
     Encoding,
     #[error("max size error, received: {0}, limit: {1}")]
     MaxSize(usize, usize),
+    #[error("unexpected EOF: {0}")]
+    EOF(String),
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 impl DbError {
     pub fn unexpected(err: &str) -> Self {
         DbError::Unexpected(err.to_string())
+    }
+
+    pub fn eof(err: &str) -> Self {
+        DbError::EOF(err.to_string())
+    }
+
+    pub fn invalid_input(err: &str) -> Self {
+        DbError::InvalidInput(err.to_string())
     }
 }
 
@@ -42,6 +54,21 @@ mod tests {
         assert_eq!(
             DbError::unexpected(msg),
             DbError::Unexpected(msg.to_string())
+        );
+    }
+
+    #[test]
+    fn eof_error() {
+        let msg = "err";
+        assert_eq!(DbError::eof(msg), DbError::EOF(msg.to_string()));
+    }
+
+    #[test]
+    fn invalid_intput_error() {
+        let msg = "err";
+        assert_eq!(
+            DbError::invalid_input(msg),
+            DbError::InvalidInput(msg.to_string())
         );
     }
 }
