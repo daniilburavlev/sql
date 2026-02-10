@@ -7,7 +7,19 @@ use crate::token::Token;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Command {
-    Create { name: String, fields: Vec<ColType> },
+    Create {
+        name: String,
+        fields: Vec<ColType>,
+    },
+    Insert {
+        table: String,
+        fields: Vec<String>,
+        values: Vec<Vec<String>>,
+    },
+    Select {
+        fields: Vec<String>,
+        table: String,
+    },
 }
 
 impl Command {
@@ -15,76 +27,159 @@ impl Command {
         if tokens.is_empty() {
             return Err(DbError::invalid_input("empty input"));
         }
-        let mut idx = 1;
+        let idx = 1;
         match tokens.first().unwrap() {
-            Token::Create => {
-                match tokens.get(idx) {
-                    Some(Token::Table) => {}
-                    Some(token) => {
-                        return Err(DbError::InvalidInput(format!(
-                            "unexpected symbol: {}",
-                            token
-                        )));
-                    }
-                    None => return Err(DbError::eof("expected 'CREATE' specifier")),
-                }
-                idx += 1;
-                let name = match tokens.get(idx) {
-                    Some(Token::Element(name)) => name.clone(),
-                    Some(token) => {
-                        return Err(DbError::InvalidInput(format!(
-                            "unexpected symbol: {}",
-                            token
-                        )));
-                    }
-                    None => return Err(DbError::eof("expected 'table_name' specifier")),
-                };
-                idx += 1;
-                check_delimeter(tokens.get(idx), '(')?;
-                idx += 1;
-                let mut fields = vec![];
-                let len = tokens.len();
-                let Some(Token::Delimiter(')')) = tokens.last() else {
-                    return Err(DbError::invalid_input("expect: ')'"));
-                };
-                while idx < len - 1 {
-                    let Some(Token::Element(field_name)) = tokens.get(idx) else {
-                        return Err(DbError::invalid_input("expected column name"));
-                    };
-                    idx += 1;
-                    let Some(Token::Element(field_type)) = tokens.get(idx) else {
-                        return Err(DbError::invalid_input("expected column type specifier"));
-                    };
-                    idx += 1;
-                    let field = match field_type.to_lowercase().as_str() {
-                        "int" => ColType::Int(field_name.clone()),
-                        "bigint" => ColType::BigInt(field_name.clone()),
-                        "varchar" => {
-                            check_delimeter(tokens.get(idx), '(')?;
-                            idx += 1;
-                            let size: u16 = get_num(tokens.get(idx))?;
-                            idx += 1;
-                            check_delimeter(tokens.get(idx), ')')?;
-                            idx += 1;
-                            ColType::Varchar(field_name.clone(), size)
-                        }
-                        _ => {
-                            return Err(DbError::InvalidInput(format!(
-                                "unknown column type: {}",
-                                field_type
-                            )));
-                        }
-                    };
-                    fields.push(field);
-                    idx += 1;
-                }
-                Ok(Self::Create { name, fields })
-            }
+            Token::Create => Self::parse_create(tokens, idx),
+            Token::Insert => Self::parse_insert(tokens, idx),
             other => Err(DbError::InvalidInput(format!(
                 "unexpected symbol: {}",
                 other
             ))),
         }
+    }
+
+    fn parse_create(tokens: Vec<Token>, mut idx: usize) -> Result<Command, DbError> {
+        match tokens.get(idx) {
+            Some(Token::Table) => {}
+            Some(token) => {
+                return Err(DbError::InvalidInput(format!(
+                    "unexpected symbol: {}",
+                    token
+                )));
+            }
+            None => return Err(DbError::eof("expected 'CREATE' specifier")),
+        }
+        idx += 1;
+        let name = match tokens.get(idx) {
+            Some(Token::Element(name)) => name.clone(),
+            Some(token) => {
+                return Err(DbError::InvalidInput(format!(
+                    "unexpected symbol: {}",
+                    token
+                )));
+            }
+            None => return Err(DbError::eof("expected 'table_name' specifier")),
+        };
+        idx += 1;
+        check_delimeter(tokens.get(idx), '(')?;
+        idx += 1;
+        let mut fields = vec![];
+        let len = tokens.len();
+        let Some(Token::Delimiter(')')) = tokens.last() else {
+            return Err(DbError::invalid_input("expect: ')'"));
+        };
+        while idx < len - 1 {
+            let Some(Token::Element(field_name)) = tokens.get(idx) else {
+                return Err(DbError::invalid_input("expected column name"));
+            };
+            idx += 1;
+            let Some(Token::Element(field_type)) = tokens.get(idx) else {
+                return Err(DbError::invalid_input("expected column type specifier"));
+            };
+            idx += 1;
+            let field = match field_type.to_lowercase().as_str() {
+                "int" => ColType::Int(field_name.clone()),
+                "bigint" => ColType::BigInt(field_name.clone()),
+                "varchar" => {
+                    check_delimeter(tokens.get(idx), '(')?;
+                    idx += 1;
+                    let size: u16 = get_num(tokens.get(idx))?;
+                    idx += 1;
+                    check_delimeter(tokens.get(idx), ')')?;
+                    idx += 1;
+                    ColType::Varchar(field_name.clone(), size)
+                }
+                _ => {
+                    return Err(DbError::InvalidInput(format!(
+                        "unknown column type: {}",
+                        field_type
+                    )));
+                }
+            };
+            fields.push(field);
+            idx += 1;
+        }
+        Ok(Self::Create { name, fields })
+    }
+
+    fn parse_insert(tokens: Vec<Token>, mut idx: usize) -> Result<Command, DbError> {
+        let Some(Token::Into) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("expected INTO"));
+        };
+        idx += 1;
+        let Some(Token::Element(table_name)) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("expected 'table_name' specifier'"));
+        };
+        idx += 1;
+        check_delimeter(tokens.get(idx), '(')?;
+        idx += 1;
+        let len = tokens.len();
+        let mut fields = vec![];
+        while idx < len {
+            match tokens.get(idx) {
+                Some(Token::Element(field)) => {
+                    idx += 1;
+                    fields.push(field.clone());
+                    let delimiter = tokens.get(idx);
+                    idx += 1;
+                    if delimiter.is_none() {
+                        return Err(DbError::eof(""));
+                    }
+                    let is_full = check_delimeter(delimiter, ')');
+                    if check_delimeter(delimiter, ',').is_err() && is_full.is_err() {
+                        return Err(DbError::InvalidInput(format!(
+                            "expect: ',', found: {}",
+                            delimiter.unwrap()
+                        )));
+                    }
+                    if is_full.is_ok() {
+                        break;
+                    }
+                }
+                Some(token) => return Err(DbError::InvalidInput(format!("unexpected: {}", token))),
+                _ => return Err(DbError::eof("")),
+            }
+        }
+        let Some(Token::Values) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("expect VALUES"));
+        };
+        idx += 1;
+        let fields_len = fields.len();
+        let mut values = Vec::new();
+        let mut sub_values = Vec::with_capacity(fields_len);
+        while idx < len {
+            check_delimeter(tokens.get(idx), '(')?;
+            idx += 1;
+            let limit = idx + fields_len * 2 - 1;
+            while idx < limit {
+                match tokens.get(idx) {
+                    Some(Token::Element(value)) => {
+                        sub_values.push(value.clone());
+                    }
+                    Some(token) => {
+                        return Err(DbError::InvalidInput(format!(
+                            "unexpected token: {}",
+                            token
+                        )));
+                    }
+                    None => return Err(DbError::eof("")),
+                }
+                idx += 1;
+                if idx < limit - 1 {
+                    check_delimeter(tokens.get(idx), ',')?;
+                    idx += 1;
+                }
+            }
+            check_delimeter(tokens.get(idx), ')')?;
+            idx += 1;
+            values.push(sub_values);
+            sub_values = Vec::with_capacity(fields_len);
+        }
+        Ok(Self::Insert {
+            table: table_name.clone(),
+            fields,
+            values,
+        })
     }
 }
 
@@ -287,5 +382,27 @@ mod tests {
             panic!("error not valdated");
         };
         assert_eq!("expected: ' ', found: 'a'", err);
+    }
+
+    #[test]
+    fn insert() {
+        let tokens = vec![
+            Token::Insert,
+            Token::Into,
+            Token::element("users"),
+            Token::Delimiter('('),
+            Token::element("id"),
+            Token::Delimiter(','),
+            Token::element("name"),
+            Token::Delimiter(')'),
+            Token::Values,
+            Token::Delimiter('('),
+            Token::element("10"),
+            Token::Delimiter(','),
+            Token::element("Lucie"),
+            Token::Delimiter(')'),
+        ];
+        let command = Command::parse_insert(tokens, 1).unwrap();
+        println!("{:?}", command);
     }
 }
