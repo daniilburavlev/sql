@@ -31,6 +31,7 @@ impl Command {
         match tokens.first().unwrap() {
             Token::Create => Self::parse_create(tokens, idx),
             Token::Insert => Self::parse_insert(tokens, idx),
+            Token::Select => Self::parse_select(tokens, idx),
             other => Err(DbError::InvalidInput(format!(
                 "unexpected symbol: {}",
                 other
@@ -179,6 +180,61 @@ impl Command {
             table: table_name.clone(),
             fields,
             values,
+        })
+    }
+
+    fn parse_select(tokens: Vec<Token>, mut idx: usize) -> Result<Command, DbError> {
+        let mut fields = Vec::new();
+        let len = tokens.len();
+        let mut token = None::<Token>;
+        for i in idx..len {
+            match tokens.get(i) {
+                Some(Token::Element(field)) => {
+                    token = Some(Token::Element(field.to_string()));
+                }
+                Some(Token::Delimiter(',')) => match token {
+                    Some(Token::Element(field)) => {
+                        fields.push(field);
+                        token = Some(Token::Delimiter(','));
+                    }
+                    Some(token) => {
+                        return Err(DbError::InvalidInput(format!(
+                            "unexpected token: {}",
+                            token
+                        )));
+                    }
+                    None => return Err(DbError::invalid_input("expected field specifier")),
+                },
+                Some(Token::From) => match token {
+                    Some(Token::Element(field)) => {
+                        fields.push(field);
+                        idx = i + 1;
+                        break;
+                    }
+                    Some(Token::Delimiter(',')) => {
+                        return Err(DbError::invalid_input("unexpected token ','"));
+                    }
+                    Some(token) => {
+                        return Err(DbError::InvalidInput(format!(
+                            "unexpected token: {}",
+                            token
+                        )));
+                    }
+                    None => {}
+                },
+                Some(token) => return Err(DbError::InvalidInput(format!("invalid: {}", token))),
+                None => return Err(DbError::eof("expected fields")),
+            }
+            if i == len - 1 {
+                return Err(DbError::invalid_input("mission FROM clause"));
+            }
+        }
+        let Some(Token::Element(table)) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("missing FROM specifier"));
+        };
+        Ok(Self::Select {
+            fields,
+            table: table.to_string(),
         })
     }
 }
@@ -404,5 +460,39 @@ mod tests {
         ];
         let command = Command::parse_insert(tokens, 1).unwrap();
         println!("{:?}", command);
+    }
+
+    #[test]
+    fn select() {
+        let query = vec![
+            Token::Select,
+            Token::element("*"),
+            Token::Delimiter(','),
+            Token::element("name"),
+            Token::From,
+            Token::element("users"),
+        ];
+        let command = Command::parse(query).unwrap();
+        assert_eq!(
+            Command::Select {
+                fields: vec!["*".to_string(), "name".to_string()],
+                table: "users".to_string(),
+            },
+            command
+        );
+    }
+
+    #[test]
+    fn select_unexpected_delimiter() {
+        let query = vec![
+            Token::Select,
+            Token::Delimiter(','),
+            Token::From,
+            Token::element("users"),
+        ];
+        let Err(DbError::InvalidInput(err)) = Command::parse(query) else {
+            panic!("syntax error is not validated");
+        };
+        assert_eq!("expected field specifier", err);
     }
 }
