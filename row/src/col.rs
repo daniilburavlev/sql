@@ -11,13 +11,6 @@ pub const BIG_INT_TYPE: u8 = 2;
 pub const VARCHAR_TYPE: u8 = 3;
 
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
-pub enum ColType {
-    Int(String),
-    BigInt(String),
-    Varchar(String, u16),
-}
-
-#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum Col {
     Int(i32),
     BigInt(i64),

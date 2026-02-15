@@ -2,7 +2,7 @@ use std::path::Path;
 
 use common::Pageable;
 use common::error::DbError;
-use row::{Col, Row};
+use row::{Col, Row, RowType};
 
 use crate::page::{
     MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, split_leaf, split_node,
@@ -30,6 +30,15 @@ impl BTree {
             pager.set_root(root_offset)?;
         }
         Ok(Self { pager })
+    }
+
+    pub fn set_structure(&mut self, row_type: RowType) -> Result<(), DbError> {
+        self.pager.set_structure(row_type)?;
+        Ok(())
+    }
+
+    pub fn get_structure(&mut self) -> Result<RowType, DbError> {
+        self.pager.get_structure()
     }
 
     pub fn insert(&mut self, key: Col, value: Row) -> Result<(), DbError> {
@@ -208,8 +217,10 @@ impl BTree {
 
 #[cfg(test)]
 mod tests {
-    use row::row;
+    use row::{ColType, row};
     use tempfile::NamedTempFile;
+
+    use crate::pager::HEADER_SIZE;
 
     use super::*;
 
@@ -223,14 +234,14 @@ mod tests {
             btree.insert(key, value).unwrap();
         }
         let mut pager = Pager::new(tempfile.path()).unwrap();
-        let left_leaf = pager.get_page(128).unwrap();
-        let root_node = pager.get_page((128 + PAGE_SIZE) as u32).unwrap();
+        let left_leaf = pager.get_page(HEADER_SIZE as u32).unwrap();
+        let root_node = pager.get_page((HEADER_SIZE + PAGE_SIZE) as u32).unwrap();
         let right_leaf = pager
-            .get_page((128 + PAGE_SIZE + PAGE_SIZE) as u32)
+            .get_page((HEADER_SIZE + PAGE_SIZE + PAGE_SIZE) as u32)
             .unwrap();
         match left_leaf {
             Page::Leaf { parent, values } => {
-                assert_eq!(parent, (128 + PAGE_SIZE) as u32);
+                assert_eq!(parent, (HEADER_SIZE + PAGE_SIZE) as u32);
                 assert_eq!(1, values.len());
             }
             _ => panic!("Unexpected node page"),
@@ -239,14 +250,14 @@ mod tests {
             Page::Node { parent, children } => {
                 assert_eq!(parent, 0);
                 assert_eq!(2, children.len());
-                assert_eq!(128, children[0].1);
-                assert_eq!((128 + PAGE_SIZE + PAGE_SIZE) as u32, children[1].1);
+                assert_eq!(HEADER_SIZE as u32, children[0].1);
+                assert_eq!((HEADER_SIZE + PAGE_SIZE + PAGE_SIZE) as u32, children[1].1);
             }
             _ => panic!("Unexpected leaf page"),
         }
         match right_leaf {
             Page::Leaf { parent, values } => {
-                assert_eq!(parent, (128 + PAGE_SIZE) as u32);
+                assert_eq!(parent, (HEADER_SIZE + PAGE_SIZE) as u32);
                 assert_eq!(1, values.len());
             }
             _ => panic!("Unexpected node page"),
@@ -263,7 +274,7 @@ mod tests {
             btree.insert(key, value).unwrap();
         }
         let mut pager = Pager::new(tempfile.path()).unwrap();
-        let mut offset = 128;
+        let mut offset = HEADER_SIZE as u32;
         for _ in 0..10 {
             pager.get_page(offset).unwrap();
             offset += PAGE_SIZE as u32;
@@ -346,5 +357,17 @@ mod tests {
         };
         assert_eq!(received, 4111);
         assert_eq!(limit, MAX_KEY_VALUE_SIZE);
+    }
+
+    #[test]
+    fn set_get_structure() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut btree = BTree::new(tmpfile.path()).unwrap();
+        let row_type = RowType {
+            columns: vec![ColType::int("id"), ColType::varchar("name", 16)],
+        };
+        btree.set_structure(row_type.clone()).unwrap();
+        let saved = btree.get_structure().unwrap();
+        assert_eq!(row_type, saved);
     }
 }

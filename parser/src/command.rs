@@ -1,3 +1,4 @@
+use core::fmt;
 use std::str::FromStr;
 
 use common::error::DbError;
@@ -236,6 +237,66 @@ impl Command {
             fields,
             table: table.to_string(),
         })
+    }
+}
+
+impl fmt::Display for Command {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Create { name, fields } => {
+                write!(f, "CREATE TABLE {}(", name)?;
+                let len = fields.len();
+                for (i, field) in fields.iter().enumerate() {
+                    write!(f, "{}", field)?;
+                    if i < len - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ")")?;
+            }
+            Self::Insert {
+                table,
+                fields,
+                values,
+            } => {
+                write!(f, "INSERT INTO {}(", table)?;
+                let len = fields.len();
+                for (i, field) in fields.iter().enumerate() {
+                    write!(f, "{}", field)?;
+                    if i < len - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ") VALUES")?;
+                let len = values.len();
+                for (i, group) in values.iter().enumerate() {
+                    write!(f, "(")?;
+                    let group_len = group.len();
+                    for (i, value) in group.iter().enumerate() {
+                        write!(f, "'{}'", value)?;
+                        if i < group_len - 1 {
+                            write!(f, ", ")?;
+                        }
+                    }
+                    write!(f, ")")?;
+                    if i < len - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+            }
+            Self::Select { table, fields } => {
+                write!(f, "SELECT ")?;
+                let len = fields.len();
+                for (i, field) in fields.iter().enumerate() {
+                    write!(f, "{}", field)?;
+                    if i < len - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, " FROM {}", table)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -494,5 +555,39 @@ mod tests {
             panic!("syntax error is not validated");
         };
         assert_eq!("expected field specifier", err);
+    }
+
+    #[test]
+    fn display_select() {
+        let select = Command::Select {
+            fields: vec!["*".to_string()],
+            table: "users".to_string(),
+        };
+        assert_eq!(select.to_string(), "SELECT * FROM users");
+    }
+
+    #[test]
+    fn display_create() {
+        let select = Command::Create {
+            name: "users".to_string(),
+            fields: vec![ColType::int("id"), ColType::varchar("name", 16)],
+        };
+        assert_eq!(
+            select.to_string(),
+            "CREATE TABLE users(id INT, name VARCHAR(16))"
+        );
+    }
+
+    #[test]
+    fn display_insert() {
+        let select = Command::Insert {
+            table: "users".to_string(),
+            fields: vec!["id".to_string(), "name".to_string()],
+            values: vec![vec!["1".to_string(), "John".to_string()]],
+        };
+        assert_eq!(
+            select.to_string(),
+            "INSERT INTO users(id, name) VALUES('1', 'John')"
+        );
     }
 }

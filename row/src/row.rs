@@ -9,13 +9,6 @@ pub struct Row {
     pub columns: Vec<Col>,
 }
 
-#[macro_export]
-macro_rules! row {
-    [$cols:expr] => {
-        Row { columns: vec![$cols] }
-    };
-}
-
 impl Row {
     pub fn add_column(&mut self, column: Col) {
         self.columns.push(column);
