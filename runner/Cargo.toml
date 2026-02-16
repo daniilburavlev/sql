@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+engine = { path = "../engine" }
+common = { path = "../common" }
+parser = { path = "../parser" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

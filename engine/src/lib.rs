@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 
 use common::error::DbError;
 use parser::Command;
@@ -15,6 +15,7 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(dir: &Path) -> Result<Self, DbError> {
+        fs::create_dir_all(dir)?;
         let storage = Storage::new(dir)?;
         Ok(Self { storage })
     }
