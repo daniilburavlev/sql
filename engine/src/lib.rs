@@ -1,12 +1,12 @@
-use std::{collections::HashMap, env::home_dir, fs, path::PathBuf};
+use std::{collections::HashMap, path::Path};
 
 use common::error::DbError;
 use parser::Command;
 use row::{Col, ColType, Row, RowType};
 
-use crate::{result::ExecResult, storage::Storage};
+use crate::{exec_result::ExecResult, storage::Storage};
 
-pub mod result;
+pub mod exec_result;
 mod storage;
 
 pub struct Engine {
@@ -14,9 +14,8 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new() -> Result<Self, DbError> {
-        let path = get_dir()?;
-        let storage = Storage::new(&path)?;
+    pub fn new(dir: &Path) -> Result<Self, DbError> {
+        let storage = Storage::new(dir)?;
         Ok(Self { storage })
     }
 
@@ -163,10 +162,39 @@ fn build_row(
     Ok(cols)
 }
 
-fn get_dir() -> Result<PathBuf, DbError> {
-    let mut path =
-        home_dir().ok_or_else(|| DbError::IO("cannot get user's home dir".to_string()))?;
-    path.push(".sql");
-    fs::create_dir_all(&path)?;
-    Ok(path)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp_dir.path()).unwrap();
+        engine
+            .execute(Command::Create {
+                name: "test".to_string(),
+                fields: vec![ColType::int("id")],
+            })
+            .unwrap();
+        engine
+            .execute(Command::Insert {
+                table: "test".to_string(),
+                fields: vec!["id".to_string()],
+                values: vec![vec![1.to_string()], vec![2.to_string()]],
+            })
+            .unwrap();
+        let rows = engine
+            .execute(Command::Select {
+                fields: vec!["id".to_string()],
+                table: "test".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            rows,
+            ExecResult {
+                field_names: vec!["id".to_string()],
+                fields: vec![vec![Col::int(1)], vec![Col::int(2)]]
+            }
+        );
+    }
 }
