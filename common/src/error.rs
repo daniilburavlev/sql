@@ -1,3 +1,5 @@
+use std::num::ParseIntError;
+
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -14,25 +16,39 @@ pub enum DbError {
     EOF(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error("field '{0}' of relation '{1}' doesn't exist")]
+    FieldNotFound(String, String),
+    #[error("PRIMARY_KEY constraint is not set")]
+    PrimaryKeyNotSet,
 }
 
 impl DbError {
     pub fn unexpected(err: &str) -> Self {
-        DbError::Unexpected(err.to_string())
+        Self::Unexpected(err.to_string())
     }
 
     pub fn eof(err: &str) -> Self {
-        DbError::EOF(err.to_string())
+        Self::EOF(err.to_string())
     }
 
     pub fn invalid_input(err: &str) -> Self {
-        DbError::InvalidInput(err.to_string())
+        Self::InvalidInput(err.to_string())
+    }
+
+    pub fn field_not_found(field: &str, relation: &str) -> Self {
+        Self::FieldNotFound(field.to_string(), relation.to_string())
     }
 }
 
 impl From<std::io::Error> for DbError {
     fn from(err: std::io::Error) -> Self {
         DbError::IO(err.to_string())
+    }
+}
+
+impl From<ParseIntError> for DbError {
+    fn from(err: ParseIntError) -> Self {
+        DbError::InvalidInput(err.to_string())
     }
 }
 
@@ -70,5 +86,25 @@ mod tests {
             DbError::invalid_input(msg),
             DbError::InvalidInput(msg.to_string())
         );
+    }
+
+    #[test]
+    fn field_not_found() {
+        let field = "win";
+        let table = "casino";
+        assert_eq!(
+            DbError::field_not_found(field, table),
+            DbError::FieldNotFound(field.to_string(), table.to_string())
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn from_parse_int_error() {
+        fn parse_int() -> Result<(), DbError> {
+            let _: i32 = "test".parse()?;
+            Ok(())
+        }
+        parse_int().unwrap();
     }
 }

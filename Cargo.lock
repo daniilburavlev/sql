@@ -45,6 +45,7 @@ dependencies = [
  "common",
  "parser",
  "row",
+ "tempfile",
 ]
 
 [[package]]

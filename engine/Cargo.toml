@@ -8,3 +8,6 @@ parser = { path = "../parser" }
 row = { path = "../row" }
 common = { path = "../common" }
 btree = { path = "../btree" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

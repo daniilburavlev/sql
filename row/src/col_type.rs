@@ -34,6 +34,14 @@ impl ColType {
             Self::Varchar(_, _) => VARCHAR_TYPE,
         }
     }
+
+    pub fn get_name(&self) -> &str {
+        match self {
+            Self::Int(name) => name,
+            Self::BigInt(name) => name,
+            Self::Varchar(name, _) => name,
+        }
+    }
 }
 
 impl fmt::Display for ColType {
@@ -173,5 +181,11 @@ mod tests {
         let Err(DbError::Encoding) = ColType::read(&unknown) else {
             panic!("error not validated");
         };
+    }
+
+    #[test]
+    fn get_name() {
+        let col_type = ColType::int("id");
+        assert_eq!("id", col_type.get_name());
     }
 }

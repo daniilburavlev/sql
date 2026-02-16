@@ -1,4 +1,4 @@
-use common::Pageable;
+use common::{Pageable, error::DbError};
 
 const ROW_TYPE_COLS_LEN_SIZE: usize = 1;
 
@@ -7,6 +7,15 @@ use crate::ColType;
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub struct RowType {
     pub columns: Vec<ColType>,
+}
+
+impl RowType {
+    pub fn get_primary_key(&self) -> Result<ColType, DbError> {
+        self.columns
+            .first()
+            .cloned()
+            .ok_or(DbError::PrimaryKeyNotSet)
+    }
 }
 
 impl Pageable for RowType {
@@ -45,6 +54,16 @@ impl Pageable for RowType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn get_primary_key() {
+        let key = ColType::int("id");
+        let row = RowType {
+            columns: vec![key.clone()],
+        };
+        let pk = row.get_primary_key().unwrap();
+        assert_eq!(pk, key);
+    }
 
     #[test]
     fn write_read() {

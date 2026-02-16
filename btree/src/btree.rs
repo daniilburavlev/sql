@@ -8,6 +8,7 @@ use crate::page::{
     MAX_KEY_VALUE_SIZE, PAGE_SIZE, get_index, insert_key_value, split_leaf, split_node,
 };
 
+use crate::pager::HEADER_SIZE;
 use crate::{
     page::{Offset, Page},
     pager::Pager,
@@ -165,6 +166,25 @@ impl BTree {
                 }
             }
         }
+    }
+
+    pub fn select_all(&mut self) -> Result<Vec<Row>, DbError> {
+        let mut offset = HEADER_SIZE as u32;
+        let latest_offset = self.pager.get_offset();
+
+        let mut rows = Vec::new();
+        while offset < latest_offset {
+            match self.pager.get_page(offset)? {
+                Page::Node { .. } => {}
+                Page::Leaf { values, .. } => {
+                    for (_, row) in values {
+                        rows.push(row);
+                    }
+                }
+            }
+            offset += PAGE_SIZE as u32;
+        }
+        Ok(rows)
     }
 
     pub fn delete(&mut self, key: Col) -> Result<Option<Row>, DbError> {
@@ -369,5 +389,19 @@ mod tests {
         btree.set_structure(row_type.clone()).unwrap();
         let saved = btree.get_structure().unwrap();
         assert_eq!(row_type, saved);
+    }
+
+    #[test]
+    fn select_all() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut btree = BTree::new(tmpfile.path()).unwrap();
+        for i in 0..100 {
+            btree.insert(Col::int(i), row![Col::int(20)]).unwrap();
+        }
+        let rows = btree.select_all().unwrap();
+        assert_eq!(100, rows.len());
+        for row in rows {
+            assert_eq!(row![Col::int(20)], row);
+        }
     }
 }
