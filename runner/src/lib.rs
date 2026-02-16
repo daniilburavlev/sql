@@ -5,7 +5,7 @@ use engine::{Engine, exec_result::ExecResult};
 
 use crate::config::Config;
 
-mod config;
+pub mod config;
 
 pub struct Runner {
     engine: Engine,

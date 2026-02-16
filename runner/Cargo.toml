@@ -7,6 +7,7 @@ edition = "2024"
 engine = { path = "../engine" }
 common = { path = "../common" }
 parser = { path = "../parser" }
+row = { path = "../row" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -150,6 +150,7 @@ dependencies = [
  "common",
  "engine",
  "parser",
+ "row",
  "tempfile",
 ]
 
