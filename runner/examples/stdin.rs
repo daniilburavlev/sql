@@ -29,6 +29,9 @@ fn main() -> Result<(), DbError> {
         io::stdout().flush().unwrap();
         match io::stdin().read_line(&mut input) {
             Ok(_) => {
+                if input.trim_end() == "exit" {
+                    break;
+                }
                 q_tx.send(input).expect("query channel closed");
                 let result = r_rx.recv().expect("result channel closed");
                 print_result(result);
@@ -39,6 +42,7 @@ fn main() -> Result<(), DbError> {
             }
         }
     }
+    Ok(())
 }
 
 fn print_result(result: Result<ExecResult, DbError>) {
