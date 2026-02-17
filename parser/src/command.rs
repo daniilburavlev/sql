@@ -221,7 +221,10 @@ impl Command {
                             token
                         )));
                     }
-                    None => {}
+                    None => {
+                        idx += 1;
+                        break;
+                    }
                 },
                 Some(token) => return Err(DbError::InvalidInput(format!("invalid: {}", token))),
                 None => return Err(DbError::eof("expected fields")),

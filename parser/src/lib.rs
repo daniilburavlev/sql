@@ -25,4 +25,17 @@ mod tests {
             command
         );
     }
+
+    #[test]
+    fn parse_select_with_no_fields() {
+        let query = "SELECT FROM users";
+        let command = parse(query).unwrap();
+        assert_eq!(
+            Command::Select {
+                table: "users".to_string(),
+                fields: vec![],
+            },
+            command
+        );
+    }
 }

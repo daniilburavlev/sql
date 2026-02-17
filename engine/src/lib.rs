@@ -65,6 +65,9 @@ impl Engine {
     }
 
     fn execute_select(&self, name: &str, fields: Vec<String>) -> Result<Vec<Vec<Col>>, DbError> {
+        if fields.is_empty() {
+            return Ok(vec![]);
+        }
         let fields_len = fields.len();
         let row_type = self.storage.get_row_type(name)?;
         let indexes = get_indexes(name, row_type, fields)?;
@@ -174,7 +177,7 @@ mod tests {
         engine
             .execute(Command::Create {
                 name: "test".to_string(),
-                fields: vec![ColType::int("id")],
+                fields: vec![ColType::int("id"), ColType::bigint("money")],
             })
             .unwrap();
         engine
@@ -197,5 +200,71 @@ mod tests {
                 fields: vec![vec![Col::int(1)], vec![Col::int(2)]]
             }
         );
+    }
+
+    #[test]
+    fn invalid_inputs() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp_dir.path()).unwrap();
+        engine
+            .execute(Command::Create {
+                name: "test".to_string(),
+                fields: vec![ColType::int("id")],
+            })
+            .unwrap();
+        let Err(err) = engine.execute(Command::Select {
+            table: "test".to_string(),
+            fields: vec!["name".to_string()],
+        }) else {
+            panic!("wrong field not validated");
+        };
+        assert_eq!(
+            "field 'name' of relation 'test' doesn't exist",
+            err.to_string()
+        );
+        let Err(err) = engine.execute(Command::Insert {
+            table: "test".to_string(),
+            fields: vec!["id".to_string()],
+            values: vec![vec!["1".to_string(), "name".to_string()]],
+        }) else {
+            panic!("invalid amount of field is not validated");
+        };
+        assert_eq!(
+            "invalid input: wrong amount of insert values",
+            err.to_string()
+        );
+        let Err(err) = engine.execute(Command::Insert {
+            table: "test".to_string(),
+            fields: vec!["name".to_string()],
+            values: vec![vec!["name".to_string()]],
+        }) else {
+            panic!("invalid amount of field is not validated");
+        };
+        assert_eq!("PRIMARY_KEY constraint is not set", err.to_string());
+        let Err(err) = engine.execute(Command::Insert {
+            table: "test".to_string(),
+            fields: vec!["id".to_string(), "name".to_string()],
+            values: vec![vec!["1".to_string(), "name".to_string()]],
+        }) else {
+            panic!("invalid amount of field is not validated");
+        };
+        assert_eq!(
+            "field 'name' of relation 'test' doesn't exist",
+            err.to_string()
+        );
+    }
+
+    #[test]
+    fn select_no_fields() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp_dir.path()).unwrap();
+        let result = engine
+            .execute(Command::Select {
+                table: "test".to_string(),
+                fields: vec![],
+            })
+            .unwrap();
+        assert!(result.field_names.is_empty());
+        assert!(result.fields.is_empty());
     }
 }
