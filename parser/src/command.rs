@@ -21,6 +21,9 @@ pub enum Command {
         fields: Vec<String>,
         table: String,
     },
+    Delete {
+        table: String,
+    },
 }
 
 impl Command {
@@ -33,6 +36,7 @@ impl Command {
             Token::Create => Self::parse_create(tokens, idx),
             Token::Insert => Self::parse_insert(tokens, idx),
             Token::Select => Self::parse_select(tokens, idx),
+            Token::Delete => Self::parse_delete(tokens, idx),
             other => Err(DbError::InvalidInput(format!(
                 "unexpected symbol: {}",
                 other
@@ -241,6 +245,22 @@ impl Command {
             table: table.to_string(),
         })
     }
+
+    fn parse_delete(tokens: Vec<Token>, mut idx: usize) -> Result<Self, DbError> {
+        if tokens.len() != 3 {
+            return Err(DbError::invalid_input("invalid delete statement"));
+        }
+        let Some(Token::From) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("expected 'FROM' clause"));
+        };
+        idx += 1;
+        let Some(Token::Element(table)) = tokens.get(idx) else {
+            return Err(DbError::invalid_input("expected relation_name"));
+        };
+        Ok(Command::Delete {
+            table: table.to_string(),
+        })
+    }
 }
 
 impl fmt::Display for Command {
@@ -297,6 +317,9 @@ impl fmt::Display for Command {
                     }
                 }
                 write!(f, " FROM {}", table)?;
+            }
+            Self::Delete { table } => {
+                write!(f, "DELETE FROM {}", table)?;
             }
         }
         Ok(())
@@ -591,6 +614,37 @@ mod tests {
         assert_eq!(
             select.to_string(),
             "INSERT INTO users(id, name) VALUES('1', 'John')"
+        );
+    }
+
+    #[test]
+    fn parse_delete() {
+        let table = "test".to_string();
+        let delete = Command::Delete {
+            table: table.clone(),
+        };
+        assert_eq!(
+            Ok(delete),
+            Command::parse(vec![Token::Delete, Token::From, Token::Element(table)])
+        );
+    }
+
+    #[test]
+    fn parse_invalid_delete() {
+        let query = vec![Token::Delete];
+        assert_eq!(
+            Err(DbError::invalid_input("invalid delete statement")),
+            Command::parse(query)
+        );
+        let query = vec![Token::Delete, Token::Delete, Token::Select];
+        assert_eq!(
+            Err(DbError::invalid_input("expected 'FROM' clause")),
+            Command::parse(query)
+        );
+        let query = vec![Token::Delete, Token::From, Token::Select];
+        assert_eq!(
+            Err(DbError::invalid_input("expected relation_name")),
+            Command::parse(query)
         );
     }
 }

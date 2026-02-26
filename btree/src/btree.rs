@@ -187,6 +187,12 @@ impl BTree {
         Ok(rows)
     }
 
+    pub fn delete_all(&mut self) -> Result<i32, DbError> {
+        let count = self.select_all()?;
+        self.pager.clear()?;
+        Ok(count.len() as i32)
+    }
+
     pub fn delete(&mut self, key: Col) -> Result<Option<Row>, DbError> {
         let mut offset = self.pager.get_root()?;
         let mut page = self.pager.get_page(offset)?;
@@ -395,6 +401,26 @@ mod tests {
     fn select_all() {
         let tmpfile = NamedTempFile::new().unwrap();
         let mut btree = BTree::new(tmpfile.path()).unwrap();
+        for i in 0..100 {
+            btree.insert(Col::int(i), row![Col::int(20)]).unwrap();
+        }
+        let rows = btree.select_all().unwrap();
+        assert_eq!(100, rows.len());
+        for row in rows {
+            assert_eq!(row![Col::int(20)], row);
+        }
+    }
+
+    #[test]
+    fn delete_all() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut btree = BTree::new(tmpfile.path()).unwrap();
+        for i in 0..100 {
+            btree.insert(Col::int(i), row![Col::int(20)]).unwrap();
+        }
+        let rows = btree.delete_all().unwrap();
+        assert_eq!(rows, 100);
+
         for i in 0..100 {
             btree.insert(Col::int(i), row![Col::int(20)]).unwrap();
         }

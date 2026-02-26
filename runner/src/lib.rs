@@ -48,6 +48,8 @@ impl Runner {
 mod tests {
     use std::{path::PathBuf, sync::mpsc, thread::spawn};
 
+    use row::Col;
+
     use super::*;
 
     #[test]
@@ -73,5 +75,11 @@ mod tests {
         assert_eq!(result.field_names.first().unwrap(), "created");
         q_tx.send("INSERT INTO users(id, name) VALUES(1, 'John')".to_string())
             .unwrap();
+
+        q_tx.send("DELETE FROM users".to_string()).unwrap();
+        let Ok(deleted) = r_rx.recv().unwrap() else {
+            panic!("cannot delete");
+        };
+        assert_eq!(Col::Int(1), deleted.fields[0][0]);
     }
 }

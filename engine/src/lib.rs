@@ -41,6 +41,13 @@ impl Engine {
                     fields: rows,
                 })
             }
+            Command::Delete { table } => {
+                let deleted = self.execute_delete(&table)?;
+                Ok(ExecResult {
+                    field_names: vec!["deleted".to_string()],
+                    fields: vec![vec![Col::int(deleted)]],
+                })
+            }
         }
     }
 
@@ -82,6 +89,10 @@ impl Engine {
             rows.push(row);
         }
         Ok(rows)
+    }
+
+    fn execute_delete(&self, from: &str) -> Result<i32, DbError> {
+        self.storage.delete_all(from)
     }
 }
 
@@ -266,5 +277,18 @@ mod tests {
             .unwrap();
         assert!(result.field_names.is_empty());
         assert!(result.fields.is_empty());
+    }
+
+    #[test]
+    fn delete_all() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp_dir.path()).unwrap();
+        let result = engine
+            .execute(Command::Delete {
+                table: "test".to_string(),
+            })
+            .unwrap();
+        assert!(!result.field_names.is_empty());
+        assert!(!result.fields.is_empty());
     }
 }

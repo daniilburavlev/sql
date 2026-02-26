@@ -116,6 +116,17 @@ impl Pager {
         let (row_type, _) = RowType::read(&buffer)?;
         Ok(row_type)
     }
+
+    pub fn clear(&mut self) -> Result<(), DbError> {
+        self.cursor = HEADER_SIZE as u32;
+        self.fd.set_len(self.cursor as u64)?;
+        let offset = self.write_page(Page::Leaf {
+            parent: 0,
+            values: vec![],
+        })?;
+        self.set_root(offset)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +149,13 @@ mod tests {
         let pager = Pager::new(tmpfile.path()).unwrap();
         let cursor2 = pager.cursor;
         assert_eq!(cursor1, cursor2);
+    }
+
+    #[test]
+    fn clear() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let mut pager = Pager::new(tmpfile.path()).unwrap();
+        pager.clear().unwrap();
+        assert_eq!(pager.cursor as usize, HEADER_SIZE + PAGE_SIZE);
     }
 }

@@ -44,6 +44,12 @@ impl Storage {
         btree.select_all()
     }
 
+    pub(crate) fn delete_all(&self, name: &str) -> Result<i32, DbError> {
+        let path = self.table_path(name);
+        let mut btree = BTree::new(&path)?;
+        btree.delete_all()
+    }
+
     fn table_path(&self, table_name: &str) -> PathBuf {
         let mut path = self.path.clone();
         path.push(table_name);
